@@ -1,0 +1,14 @@
+ardupilot
+DroNS3
+MissionPlanner
+
+LKH_output.dat
+LKH_run-output.txt
+WSN_TSP.par
+WSN_TSP.tsp
+mip1.log
+odometry/odometer_measurements.txt
+run_stats.txt
+scenario_online.txt
+scenario_online_setup.txt
+scenario_run.txt
