@@ -21,7 +21,7 @@ HolisticFramework
 └───DroNS3
 │   │   ...
 │   
-└───fMissionPlanner
+└───MissionPlanner
 │   │   ...
 ```
 
