@@ -1,0 +1,5 @@
+# Location of node data file
+/home/jonathan/Research/HolisticFramework/Orchestrator/MissionPlanner/test/data/node_data.dat
+# Location of drone data file
+/home/jonathan/Research/HolisticFramework/Orchestrator/MissionPlanner/test/data/drone_data.dat
+# Location of problem input file, followed by drone data
