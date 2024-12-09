@@ -4,7 +4,7 @@ import time
 
 
 # Path to the C++ executable
-ORCHESTRATOR_PATH = "/home/minespecs/Research/HolisticFramework/"
+ORCHESTRATOR_PATH = "/home/jonathan/Research/HolisticFramework/Orchestrator/"
 # Run parameters
 NUM_PLOTS = 10
 BATTERY_BUFFER = 0.05
@@ -221,9 +221,10 @@ def run_framework(input_file):
 		good_plan = True
 		total_speeds = 0
 		total_alpha = 0
-		## For each plan file generated:
-		num_plans = len([name for name in os.listdir(plan_path) if os.path.isfile(os.path.join(plan_path, name))])
+		# How many plans did we generate? (there is a blank .temp file we need to ignore)
+		num_plans = len([name for name in os.listdir(plan_path) if os.path.isfile(os.path.join(plan_path, name))]) - 1
 		print("Number of generated plans: ", num_plans)
+		## For each plan file generated:
 		for i in range(num_plans):
 			## For iterations
 			stats = []
