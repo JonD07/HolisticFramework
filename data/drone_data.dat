@@ -1,0 +1,30 @@
+## Drone energy model from "A Power Consumption Model for Multi-rotor Small Unmanned Aircraft Systems"
+0
+# Max speed
+20.0
+# Usable Jules in battery (.8 of 3DR IRIS+.. found on Amazon)
+111888
+# Battery swap time
+120
+# Energy profile ( c1x^{3} + c2x^{2} + c3x + c4 )
+0.0296 0 0 160.017711722
+## Drone energy model from "Looking before Crossing..."
+1
+# Max speed
+18.0
+# Usable Jules in battery (assuming 10.0Ah, 15.2v battery)
+437760
+# Battery swap time
+120
+# Energy profile ( c1x^{3} + c2x^{2} + c3x + c4 )
+0.07 0.0391 -13.196 390.95
+## Drone energy model from VICTOR-CPR
+2
+# Max speed
+12.0
+# Usable Jules in battery (assuming 10.0Ah, 15.2v battery)
+360000
+# Battery swap time
+120
+# Energy profile ( c1x^{3} + c2x^{2} + c3x + c4 )
+0 0 -1.695 396.743

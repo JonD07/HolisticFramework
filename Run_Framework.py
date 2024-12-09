@@ -4,7 +4,7 @@ import time
 
 
 # Path to the C++ executable
-ORCHESTRATOR_PATH = "/home/jonathan/Research/HolisticFramework/Orchestrator/"
+ORCHESTRATOR_PATH = "/home/minespecs/Research/HolisticFramework/"
 # Run parameters
 NUM_PLOTS = 10
 BATTERY_BUFFER = 0.05
@@ -17,7 +17,7 @@ ITERATIONS = 3
 
 mp_path = ORCHESTRATOR_PATH+"MissionPlanner/build/mission-planner"
 sim_path = ORCHESTRATOR_PATH+"DroNS3/simulation.py"
-exp_path = ORCHESTRATOR_PATH+"MissionPlanner/test/FW_Test/"
+exp_path = ORCHESTRATOR_PATH+"fw_TestSet/"
 plan_path = ORCHESTRATOR_PATH+"plan/"
 odom_path = ORCHESTRATOR_PATH+"odometry/"
 python_path = "/usr/bin/python3.8"
@@ -92,10 +92,12 @@ def run_mission_planner(alg, results_path, run_num):
 	stdout, stderr = process.communicate()  # Waits for the executable to finish
 	
 	if stderr:
-		print(f"Error:\n{stderr.decode()}")
+		print(f"\n*****\nError Running Global Planner: {stderr.decode()}\n*****\n")
 	else:
 		print("Successfully Ran Mission Planner")
-		print(stdout)
+		with open("global_planner.out", 'a') as output_file:
+			output_file.write("\n** New Run: **\n")
+			output_file.write(stdout.decode("utf-8"))
 
 
 # Function to run simulation and wait for it to finish
