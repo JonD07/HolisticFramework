@@ -5,7 +5,7 @@ This is the Holistic Planning Framework described in the paper "*Holistic Path P
 ## Using Framework
 
 ### Prerequisites
-You must first download clone the following git repositories to use this framework:
+You must first download/clone the following git repositories to use this framework:
 
 https://github.com/JonD07/MissionPlanner
 
@@ -26,7 +26,7 @@ HolisticFramework
 ```
 
 
-Please follow the setup instructions for each of these repositories.
+Please follow the setup instructions for each of these repositories. Note that you must build the Mission Planner.
 
 ### Running Framework
 Update `ORCHESTRATOR_PATH` in the `Run_Framework.py` script so that it points to the location of this repository in your file system. If you chose to clone the above repositories to a different location and in the root directory of this repository, then you will also need to update `mp_path`, `sim_path`, and `exp_path`.
