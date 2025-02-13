@@ -1,10 +1,12 @@
 import subprocess
 import os, os.path, shutil
 import time
+import sys
+
 
 
 # Path to the C++ executable
-ORCHESTRATOR_PATH = "/home/jonathan/Research/HolisticFramework/Orchestrator/"
+ORCHESTRATOR_PATH = "/home/minespecs/Research/HolisticFramework/"
 # Run parameters
 NUM_PLOTS = 10
 BATTERY_BUFFER = 0.05
@@ -17,7 +19,7 @@ ITERATIONS = 3
 
 mp_path = ORCHESTRATOR_PATH+"MissionPlanner/build/mission-planner"
 sim_path = ORCHESTRATOR_PATH+"DroNS3/simulation.py"
-exp_path = ORCHESTRATOR_PATH+"fw_TestSet/"
+exp_path = ORCHESTRATOR_PATH+"FW_Test/"
 plan_path = ORCHESTRATOR_PATH+"plan/"
 odom_path = ORCHESTRATOR_PATH+"odometry/"
 python_path = "/usr/bin/python3.8"
@@ -145,7 +147,7 @@ def collect_run_stats(stat_list):
 					speed_count += 1
 					total_time += dt
 			line_i += 1
-		print(f"Plan {i} Totals (J,v,t): ", total_energy, speed_total/speed_count, total_time)
+		print(f"Plan Totals (J,v,t): ", total_energy, speed_total/speed_count, total_time)
 		stat_list.append([total_energy, speed_total/speed_count, total_time])
 
 
@@ -272,13 +274,25 @@ if __name__ == '__main__':
 	End-while
 	'''
 
-	for n in range(5, 31, 5):
-		for i in range(NUM_PLOTS):
-			input_file = exp_path+f"plot_{n}_{i}.txt"
-			print(f"Running framework on {input_file}")
-			# Record this data
-			f = open("run_stats.txt", "a")
-			f.write(f"Running framework on {input_file}\n")
-			f.close()
-			# Run our algorithm
-			run_framework(input_file)
+	if len(sys.argv) == 1:
+		print("Running all inputs in:", exp_path)
+		for n in range(5, 31, 5):
+			for i in range(NUM_PLOTS):
+				input_file = exp_path+f"plot_{n}_{i}.txt"
+				print(f"Running framework on {input_file}")
+				# Record this data
+				f = open("run_stats.txt", "a")
+				f.write(f"Running framework on {input_file}\n")
+				f.close()
+				# Run our algorithm
+				run_framework(input_file)
+	elif len(sys.argv) == 2:
+		print("Running framework on single input:", sys.argv[1])
+		# Record this data
+		f = open("run_stats.txt", "a")
+		f.write(f"Running framework on {sys.argv[1]}\n")
+		f.close()
+		# Run our algorithm
+		run_framework(sys.argv[1])
+	else:
+		print("Unexpected arguments...")
