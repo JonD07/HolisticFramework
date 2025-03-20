@@ -13,6 +13,7 @@ BATTERY_BUFFER = 0.05
 DRONE_NUM = 1
 INITIAL_ALPHA = 1.0
 INITIAL_V = 10.0
+# INITIAL_V = 6.4
 # Mission planner algorithm
 ALGORITHM = 3
 ITERATIONS = 3
@@ -90,6 +91,7 @@ def prepare_standard_scenario(input_file_location, v, alpha):
 # Function to run mission planner and wait for it to finish
 def run_mission_planner(alg, results_path, run_num):
 	# scenario-file alg plan-flag results-flag results-path run-num
+	print(" Running Mission Planner:", mp_path, 'scenario_run.txt', str(alg), '1', '1', results_path, str(run_num))
 	process = subprocess.Popen([mp_path, 'scenario_run.txt', str(alg), '1', '1', results_path, str(run_num)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	stdout, stderr = process.communicate()  # Waits for the executable to finish
 	
@@ -108,10 +110,10 @@ def run_simulation(sim_plan_path):
 	process = subprocess.Popen([python_path, sim_path, sim_plan_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	stdout, stderr = process.communicate()  # Waits for the executable to finish
 	if stderr:
+		print(str(stdout))
 		print(f"Error:\n{stderr.decode()}")
 	else:
 		print("Successfully Ran Simulation")
-		print(stdout)
 
 
 def collect_run_stats(stat_list):
@@ -187,13 +189,17 @@ def consistent(run_stats, v_j, alpha):
 		print(f"Average energy {avg_energy} higher than {safe_battery()}, update alpha to {parameters[1]}")
 	# Error in speed (Not required for consistency)
 	v_error = (v_j-avg_speed)/v_j
-	if abs(v_error) > 0.1:
-		print(f"Average speed {avg_speed} not close to {v_j}, error: {abs(v_error)}")
+	if abs(v_error) > 0.25:
+		print(f"Average speed {avg_speed} not close to {v_j}!! error: {abs(v_error)}")
 		# Update the stats
+		good_plan = False
+	elif abs(v_error) > 0.1:
+		print(f"Average speed {avg_speed} not close to {v_j}, error: {abs(v_error)}")
 	parameters[0] = avg_speed
 	# Record this data
 	f = open("run_stats.txt", "a")
 	f.write(f"{avg_energy} {avg_speed} {avg_time}\n")
+	f.write(f"Consistent results: {good_plan}, {parameters}\n")
 	f.close()
 	print("Consistent results:", good_plan, parameters)
 
