@@ -112,6 +112,7 @@ def run_simulation(sim_plan_path):
 	if stderr:
 		print(str(stdout))
 		print(f"Error:\n{stderr.decode()}")
+		print(stdout)
 	else:
 		print("Successfully Ran Simulation")
 
