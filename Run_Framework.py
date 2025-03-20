@@ -109,9 +109,9 @@ def run_simulation(sim_plan_path):
 	stdout, stderr = process.communicate()  # Waits for the executable to finish
 	if stderr:
 		print(f"Error:\n{stderr.decode()}")
+		print(stdout)
 	else:
 		print("Successfully Ran Simulation")
-		print(stdout)
 
 
 def collect_run_stats(stat_list):
