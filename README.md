@@ -11,7 +11,7 @@ https://github.com/JonD07/MissionPlanner
 
 https://github.com/pervasive-computing-systems-group/DroNS3
 
-We recommend cloning these projects into the root directory of this repository. E.g.:
+You must checkout the dev/HolisticPlanner branch of the DroNS3 repository. We recommend cloning these projects into the root directory of this repository. E.g.:
 
 ```
 HolisticFramework
@@ -26,10 +26,17 @@ HolisticFramework
 ```
 
 
-Please follow the setup instructions for each of these repositories. Note that you must build the Mission Planner.
+Please follow the setup instructions for each of these repositories. Note that you must build the Mission Planner project and the SimpleNetSim in DroNS3.
 
 ### Setting Parameters
-Update `ORCHESTRATOR_PATH` in the `Run_Framework.py` script so that it points to the location of this repository in your file system. If you chose to clone the above repositories to a different location and in the root directory of this repository, then you will also need to update `mp_path`, `sim_path`, and `exp_path`.
+Update the file paths in the following locations so that they match your own file structure:
+
+- `scenario.txt`
+- `scenario_online_setup.txt`
+- `DroNS3/defines.py`
+- `ORCHESTRATOR_PATH` and `python_path` in the `Run_Framework.py`
+
+If you chose to clone the above repositories to a different location than the root directory of this repository, then you will also need to update `mp_path`, `sim_path`, and `exp_path` in the `Run_Framework.py` script.
 
 You can also update run parameters at the top of the `Run_Framework.py` script, such as the number of input files to run, the battery safety buffer, or which mission planner algorithm to use.
 
@@ -45,7 +52,13 @@ cd ArduCopter
 sim_vehicle.py -f quad -L CSM_SurveyField --console --map --osd
 ```
 
-Once the simulator has fully launched, launch the framework in a new tab:
+Once the simulator has fully launched, launch the framework in a new tab. To run a single problem input (for example, the field prototype from the paper), pass the `Run_Framework.py` script the location of the input file:
+
+```
+python Run_Framework.py Field_Inputs/field_exp.txt
+```
+
+To run the full framework experiment, run the script without any arguments:
 
 ```
 python Run_Framework.py
