@@ -26,7 +26,7 @@ HolisticFramework
 ```
 
 
-Please follow the setup instructions for each of these repositories. Note that you must build the Mission Planner project and the SimpleNetSim in DroNS3.
+Please follow the setup instructions for each of these repositories. Note that you must build the Mission Planner project and the SimpleNetSim in DroNS3. Installing NS3 is not strictly required to use DroNS3 on the dev/HolisticPlanner branch.
 
 ### Setting Parameters
 Update the file paths in the following locations so that they match your own file structure:
