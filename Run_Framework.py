@@ -10,13 +10,16 @@ ORCHESTRATOR_PATH = "/home/minespecs/Research/HolisticFramework/"
 # Run parameters
 NUM_PLOTS = 10
 BATTERY_BUFFER = 0.05
+TOTAL_BATTERY = 150000
+BATTERY_SWAP = 120
 DRONE_NUM = 1
 INITIAL_ALPHA = 1.0
-INITIAL_V = 10.0
-# INITIAL_V = 6.4
+# INITIAL_V = 10.0
+INITIAL_V = 7.5
 # Mission planner algorithm
 ALGORITHM = 3
 ITERATIONS = 3
+CONSISTENT_SPEED = True
 
 mp_path = ORCHESTRATOR_PATH+"MissionPlanner/build/mission-planner"
 sim_path = ORCHESTRATOR_PATH+"DroNS3/simulation.py"
@@ -31,7 +34,7 @@ We are using drone 1, from "Looking before Crossing..." paper but with limited b
 # Max speed
 10.0
 # Usable Jules in battery (assuming 10.0Ah, 15.2v battery)
-75000
+100000
 # Battery swap time
 120
 # Energy profile ( c1x^{3} + c2x^{2} + c3x + c4 )
@@ -43,11 +46,11 @@ def energy_used(v, t):
 	# Power is jule/seconds -> power*time = jules
 	return power*t
 
-def total_battery():
-	return 75000
+# def total_battery():
+# 	return TOTAL_BATTERY
 
 def safe_battery():
-	return total_battery()*(1-BATTERY_BUFFER)
+	return TOTAL_BATTERY*(1-BATTERY_BUFFER)
 
 def delete_files(folder_path):
 	'''
@@ -91,14 +94,14 @@ def prepare_standard_scenario(input_file_location, v, alpha):
 # Function to run mission planner and wait for it to finish
 def run_mission_planner(alg, results_path, run_num):
 	# scenario-file alg plan-flag results-flag results-path run-num
-	print(" Running Mission Planner:", mp_path, 'scenario_run.txt', str(alg), '1', '1', results_path, str(run_num))
+	print("  Running Mission Planner:", mp_path, 'scenario_run.txt', str(alg), '1', '1', results_path, str(run_num))
 	process = subprocess.Popen([mp_path, 'scenario_run.txt', str(alg), '1', '1', results_path, str(run_num)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	stdout, stderr = process.communicate()  # Waits for the executable to finish
 	
 	if stderr:
 		print(f"\n*****\nError Running Global Planner: {stderr.decode()}\n*****\n")
 	else:
-		print("Successfully Ran Mission Planner")
+		print("  Successfully Ran Mission Planner")
 		with open("global_planner.out", 'a') as output_file:
 			output_file.write("\n** New Run: **\n")
 			output_file.write(stdout.decode("utf-8"))
@@ -106,14 +109,25 @@ def run_mission_planner(alg, results_path, run_num):
 
 # Function to run simulation and wait for it to finish
 def run_simulation(sim_plan_path):
+	# Count the number of sensors in this plan
+	num_sensors = 0
+	with open(sim_plan_path, 'r') as plan_file:
+		for line in plan_file:
+			line_list = line.split()
+			if int(line_list[0]) == 5:
+				num_sensors += 1
+	# Time run
+	start_time = time.time()
 	# path-to-python, path-to-DroNS3-sim, path-to-plan
 	process = subprocess.Popen([python_path, sim_path, sim_plan_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	stdout, stderr = process.communicate()  # Waits for the executable to finish
+	end_time = time.time()
 	if stderr:
-		print(str(stdout))
+		# print(str(stdout))
 		print(f"Error:\n{stderr.decode()}")
 	else:
-		print("Successfully Ran Simulation")
+		print("  Successfully Ran Simulation")
+	return end_time - start_time, num_sensors
 
 
 def collect_run_stats(stat_list):
@@ -149,12 +163,12 @@ def collect_run_stats(stat_list):
 					speed_count += 1
 					total_time += dt
 			line_i += 1
-		print(f"Plan Totals (J,v,t): ", total_energy, speed_total/speed_count, total_time)
+		print(f"   Plan Totals (J,v,t): ", total_energy, speed_total/speed_count, total_time)
 		stat_list.append([total_energy, speed_total/speed_count, total_time])
 
 
 # Determines if the plan is consistent. Returns T/F and a list with new v_j/alpha
-def consistent(run_stats, v_j, alpha):
+def consistent(run_stats, v_j, alpha, i = 0):
 	'''
 	Analyzes energy used and average speed of the run_stats, which should be a list of lists, 
 	where each nested list has total-energy, average-speed, and total-time of each time a 
@@ -162,7 +176,7 @@ def consistent(run_stats, v_j, alpha):
 	recommended alpha. The consistency boolean will be True if no sub-tour went over the 
 	allowed energy budget.
 	'''
-	print("Checking Consistency", run_stats)
+	print(" Checking Consistency", run_stats)
 	# Assume good until otherwise stated..
 	good_plan = True
 	parameters = [v_j, alpha]
@@ -180,36 +194,39 @@ def consistent(run_stats, v_j, alpha):
 	avg_energy = energy_total/len(run_stats)
 	avg_speed = speed_total/len(run_stats)
 	avg_time = time_total/len(run_stats)
-	print("Total averages: ", avg_energy, avg_speed, avg_time)
+	print("  Total averages: ", avg_energy, avg_speed, avg_time)
 	# Are we good on energy?
 	if max_energy > safe_battery():
 		good_plan = False
 		# Update alpha (only when bad!) a_i+1 = a_i(desired-usage/actual-usage)
-		parameters[1] = alpha*(1 - 0.5*(1 - safe_battery()/avg_energy))
-		print(f"Average energy {avg_energy} higher than {safe_battery()}, update alpha to {parameters[1]}")
+		parameters[1] = alpha*(1 - 0.75*(1 - safe_battery()/max_energy))
+		print(f"   Max recorded energy {max_energy} higher than {safe_battery()}, update alpha to {parameters[1]}")
 	# Error in speed (Not required for consistency)
 	v_error = (v_j-avg_speed)/v_j
 	if abs(v_error) > 0.25:
-		print(f"Average speed {avg_speed} not close to {v_j}!! error: {abs(v_error)}")
-		# Update the stats
-		good_plan = False
+		print(f"  Average speed {avg_speed} not close to {v_j}!! error: {abs(v_error)}")
+		if CONSISTENT_SPEED:
+			# Update the stats
+			good_plan = False
 	elif abs(v_error) > 0.1:
-		print(f"Average speed {avg_speed} not close to {v_j}, error: {abs(v_error)}")
+		print(f"  Average speed {avg_speed} not close to {v_j}, error: {abs(v_error)}")
 	parameters[0] = avg_speed
+
 	# Record this data
 	f = open("run_stats.txt", "a")
-	f.write(f"{avg_energy} {avg_speed} {avg_time}\n")
-	f.write(f"Consistent results: {good_plan}, {parameters}\n")
+	f.write(f"Plan {i} speed: {avg_speed}, average-energy: {avg_energy}, time: {avg_time}\n")
 	f.close()
-	print("Consistent results:", good_plan, parameters)
-
+	print("  * Consistent results:", good_plan, parameters)
+	
 	return good_plan, parameters
 
 
-def run_framework(input_file):
+def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL_V, find_consistent = True):
 	## Set initial v_j and alpha_j guess
-	v_j = INITIAL_V
-	alpha = INITIAL_ALPHA
+	v_j = initial_v
+	# v_j = 5.0
+	alpha = initial_alpha
+	# alpha = 0.7
 	iteration = 0
 	run_solver = True
 	## While still not consistent
@@ -231,29 +248,51 @@ def run_framework(input_file):
 		total_alpha = 0
 		# How many plans did we generate? (there is a blank .temp file we need to ignore)
 		num_plans = len([name for name in os.listdir(plan_path) if os.path.isfile(os.path.join(plan_path, name))]) - 1
-		print("Number of generated plans: ", num_plans)
+		print(" Number of generated plans: ", num_plans)
+		total_time = 0
+		cumulative_latency = 0
+		total_sensors = 0
 		## For each plan file generated:
 		for i in range(num_plans):
 			## For iterations
 			stats = []
+			r_time = 0
+			sensors = 0
 			for run in range(ITERATIONS):
 				## Run simultor
 				print(f" Running Simulator")
-				run_simulation(plan_path+f"plan_0_{i}.pln")
+				r_time, sensors = run_simulation(plan_path+f"plan_0_{i}.pln")
 				# Short sleep to let the sim fully finish
 				time.sleep(2.5)
 				## Collect average energy used, drone speed
 				collect_run_stats(stats)
 			## Are plans consistent?
-			good_tour, new_stats = consistent(stats, v_j, alpha)
+			good_tour, new_stats = consistent(stats, v_j, alpha, i)
+			# Record this data
+			f = open("run_stats.txt", "a")
+			f.write(f"Sensors: {sensors}, time: {r_time}\n")
+			f.write(f"Consistent plan: {good_tour}, recommended parameters: {new_stats}\n")
+			f.close()
 			# Track the averages
 			total_speeds += new_stats[0]
 			total_alpha += new_stats[1]
 			good_plan = good_plan and good_tour
+			if i > 0:
+				total_time+=r_time+BATTERY_SWAP
+			else:
+				total_time+=r_time
+			cumulative_latency += total_time*sensors
+			total_sensors += sensors
 		# Do we run again..?
-		run_solver = not good_plan
+		if find_consistent:
+			run_solver = not good_plan
 		v_j = total_speeds/num_plans
 		alpha = min(total_alpha/num_plans, alpha)
+		# Record this data
+		f = open("run_stats.txt", "a")
+		f.write(f"Results: {good_plan} {total_sensors} {alpha} {v_j} {cumulative_latency/total_sensors} {total_time} {input_file}\n")
+		f.close()
+		
 
 
 if __name__ == '__main__':
@@ -281,7 +320,28 @@ if __name__ == '__main__':
 	'''
 
 	if len(sys.argv) == 1:
-		print("Running all inputs in:", exp_path)
+		# print("(Standard) Running all inputs in:", exp_path)
+		# for n in range(5, 31, 5):
+		# 	for i in range(NUM_PLOTS):
+		# 		input_file = exp_path+f"plot_{n}_{i}.txt"
+		# 		print(f"Running framework on {input_file}")
+		# 		# Record this data
+		# 		f = open("run_stats.txt", "a")
+		# 		f.write(f"Running framework on {input_file}\n")
+		# 		f.close()
+		# 		# Run our algorithm
+		# 		run_framework(input_file)
+		print("(Alpha fixed at 0.75) Running all inputs in:", exp_path)
+		for n in range(25, 26, 5):
+			for i in range(2,NUM_PLOTS):
+				input_file = exp_path+f"plot_{n}_{i}.txt"
+				print(f"Running framework on {input_file}")
+				# Record this data
+				f = open("run_stats.txt", "a")
+				f.write(f"Running framework on {input_file}\n")
+				f.close()
+				# Run our algorithm
+				run_framework(input_file,initial_alpha=0.75,find_consistent=False)
 		for n in range(5, 31, 5):
 			for i in range(NUM_PLOTS):
 				input_file = exp_path+f"plot_{n}_{i}.txt"
@@ -291,7 +351,19 @@ if __name__ == '__main__':
 				f.write(f"Running framework on {input_file}\n")
 				f.close()
 				# Run our algorithm
-				run_framework(input_file)
+				run_framework(input_file,initial_alpha=0.75,find_consistent=False)
+		print("(Alpha fixed at 0.5) Running all inputs in:", exp_path)
+		for n in range(5, 31, 5):
+			for i in range(NUM_PLOTS):
+				input_file = exp_path+f"plot_{n}_{i}.txt"
+				print(f"Running framework on {input_file}")
+				# Record this data
+				f = open("run_stats.txt", "a")
+				f.write(f"Running framework on {input_file}\n")
+				f.close()
+				# Run our algorithm
+				run_framework(input_file,initial_alpha=0.5,find_consistent=False)
+
 	elif len(sys.argv) == 2:
 		print("Running framework on single input:", sys.argv[1])
 		# Record this data

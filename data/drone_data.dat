@@ -12,8 +12,9 @@
 1
 # Max speed
 18.0
-# Usable Jules in battery (assuming 10.0Ah, 15.2v battery)
-437760
+# Usable Jules in battery (assuming 10.0Ah, 15.2v battery) Standard: 437760
+#437760
+150000
 # Battery swap time
 120
 # Energy profile ( c1x^{3} + c2x^{2} + c3x + c4 )
