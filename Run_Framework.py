@@ -320,20 +320,9 @@ if __name__ == '__main__':
 	'''
 
 	if len(sys.argv) == 1:
-		# print("(Standard) Running all inputs in:", exp_path)
-		# for n in range(5, 31, 5):
-		# 	for i in range(NUM_PLOTS):
-		# 		input_file = exp_path+f"plot_{n}_{i}.txt"
-		# 		print(f"Running framework on {input_file}")
-		# 		# Record this data
-		# 		f = open("run_stats.txt", "a")
-		# 		f.write(f"Running framework on {input_file}\n")
-		# 		f.close()
-		# 		# Run our algorithm
-		# 		run_framework(input_file)
-		print("(Alpha fixed at 0.75) Running all inputs in:", exp_path)
-		for n in range(25, 26, 5):
-			for i in range(2,NUM_PLOTS):
+		print("(Standard) Running all inputs in:", exp_path)
+		for n in range(5, 31, 5):
+			for i in range(NUM_PLOTS):
 				input_file = exp_path+f"plot_{n}_{i}.txt"
 				print(f"Running framework on {input_file}")
 				# Record this data
@@ -341,7 +330,8 @@ if __name__ == '__main__':
 				f.write(f"Running framework on {input_file}\n")
 				f.close()
 				# Run our algorithm
-				run_framework(input_file,initial_alpha=0.75,find_consistent=False)
+				run_framework(input_file)
+		print("(Alpha fixed at 0.75) Running all inputs in:", exp_path)
 		for n in range(5, 31, 5):
 			for i in range(NUM_PLOTS):
 				input_file = exp_path+f"plot_{n}_{i}.txt"
