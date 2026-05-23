@@ -6,7 +6,7 @@ import sys
 
 
 # Path to the C++ executable
-ORCHESTRATOR_PATH = "/home/minespecs/Research/HolisticFramework/"
+ORCHESTRATOR_PATH = "/home/jonathan/git/HolisticFramework/"
 # Run parameters
 NUM_PLOTS = 10
 BATTERY_BUFFER = 0.05
@@ -26,7 +26,9 @@ sim_path = ORCHESTRATOR_PATH+"DroNS3/simulation.py"
 exp_path = ORCHESTRATOR_PATH+"FW_Test/"
 plan_path = ORCHESTRATOR_PATH+"plan/"
 odom_path = ORCHESTRATOR_PATH+"odometry/"
-python_path = "/usr/bin/python3.8"
+sim_out_path = ORCHESTRATOR_PATH+"sim_out/"
+fw_out_path = ORCHESTRATOR_PATH+"framework_out/"
+python_path = "/home/jonathan/git/HolisticFramework/drone_env/bin/python"
 
 '''
 We are using drone 1, from "Looking before Crossing..." paper but with limited battery
@@ -74,6 +76,7 @@ def delete_files(folder_path):
 def prepare_standard_scenario(input_file_location, v, alpha):
 	# Clear the old plan files
 	delete_files(plan_path)
+	delete_files(sim_out_path)
 	# Read from scenario.txt
 	with open('scenario.txt', 'r') as scenario_file:
 		content = scenario_file.read()
@@ -128,6 +131,118 @@ def run_simulation(sim_plan_path):
 	else:
 		print("  Successfully Ran Simulation")
 	return end_time - start_time, num_sensors
+
+
+def update_input_for_remaining_sensors(original_input_file, unvisited_ids, new_input_file):
+	'''
+	Reads the original scenario file and writes a new one containing ONLY 
+	the base station and the unvisited sensors.
+	'''
+	# Convert all unvisited IDs to integers to safely handle both string and int inputs
+	unvisited_ids_int = [int(sensor_id) for sensor_id in unvisited_ids]
+
+	with open(original_input_file, 'r') as f:
+		lines = f.readlines()
+
+	# The first line contains the original number of sensors
+	num_original_sensors = int(lines[0].strip())
+	
+	new_sensor_lines = []
+
+	# Loop through the original sensors (Line 1 to num_original_sensors)
+	# Sensor ID corresponds to loop index (0 to num_original_sensors - 1)
+	for sensor_id in range(num_original_sensors):
+		if sensor_id in unvisited_ids_int:
+			new_sensor_lines.append(lines[sensor_id + 1])
+
+	# The base station is located immediately after the sensors
+	base_station_line = lines[num_original_sensors + 1]
+
+	# Write the updated data to the new input file
+	with open(new_input_file, 'w') as f:
+		# Write the NEW number of sensors
+		f.write(f"{len(new_sensor_lines)}\n")
+		
+		# Write only the unvisited sensors
+		for line in new_sensor_lines:
+			f.write(line)
+			
+		# Append the base station at the end
+		f.write(base_station_line)
+
+
+def run_baseline(input_file, fixed_alpha=1.0, fixed_v=INITIAL_V):
+	current_input = input_file
+	iteration = 0
+	all_sensors_visited = False
+	cumulative_time = 0
+	cumulative_latency = 0
+	total_sensors_collected = 0
+	unvisited_file = sim_out_path+"unvisited_sensors.txt"
+
+	while not all_sensors_visited:
+		all_sensors_visited = True
+		# Prepare scenario files
+		prepare_standard_scenario(current_input, fixed_v, fixed_alpha)
+		# Run the mission planner
+		run_mission_planner(ALGORITHM, exp_path, 0)
+		# How many plans did we generate? (there is a blank .temp file we need to ignore)
+		num_plans = len([name for name in os.listdir(plan_path) if os.path.isfile(os.path.join(plan_path, name))]) - 1
+		print(" Number of generated plans: ", num_plans)
+		# For each generated plan...
+		for i in range(num_plans):
+			restart_planner = False
+			# Run the simulator
+			print(f" Running Simulator")
+			r_time, sensors = run_simulation(plan_path+f"plan_0_{i}.pln")
+			# Do we have left-over waypoints?
+			if os.path.exists(unvisited_file):
+				# Yes... Collect ALL unvisited waypoints
+				restart_planner = True
+				unvisited_ids = []
+				# Get sensors from this mission
+				with open(unvisited_file, 'r') as f:
+					unvisited_ids = f.read().split()
+				print(f"   Failed to visit: {unvisited_ids}")
+				sensors -= len(unvisited_ids)
+				# Get the sensors from plans (i+1) up to num_plans
+				for j in range((i+1), num_plans):
+					# Open the plan file in read mode
+					with open(plan_path+f"plan_0_{j}.pln", "r") as file:
+						# Loop through each line in the file
+						for line in file:
+							# Split the line into a list of strings based on whitespace
+							parts = line.split()
+							# Check if the line is not empty and if the first element is '5'
+							if len(parts) > 0 and parts[0] == '5':
+								# The sensor ID is the second element (index 1)
+								sensor_id = parts[1]
+								# Append the ID to our list (converting it to an integer is optional but recommended)
+								unvisited_ids.append(int(sensor_id))
+				# Clean up for next run
+				os.remove(unvisited_file)
+				# Update the input file
+				current_input = exp_path + f"temp_input.txt"
+				update_input_for_remaining_sensors(input_file, unvisited_ids, current_input)
+				# Break out of for... retart while-loop
+				all_sensors_visited = False
+
+			# Record run stats
+			total_sensors_collected += sensors
+			if iteration > 1:
+				cumulative_time += r_time + BATTERY_SWAP
+			else:
+				cumulative_time += r_time
+			cumulative_latency += cumulative_time*sensors
+			iteration += 1
+			if restart_planner:
+				break
+
+	# If we hit this part... we hit every sensor!
+	print("  All sensors successfully visited!")
+	# Record final data for the baseline
+	with open(fw_out_path+"baseline_stats.txt", "a") as f:
+		f.write(f"{{sensors:{total_sensors_collected}, alpha:{fixed_alpha}, time:{cumulative_time}, average_lat:{cumulative_latency/total_sensors_collected}, sorties:{iteration}, input:{input_file}}}\n")
 
 
 def collect_run_stats(stat_list):
@@ -213,7 +328,7 @@ def consistent(run_stats, v_j, alpha, i = 0):
 	parameters[0] = avg_speed
 
 	# Record this data
-	f = open("run_stats.txt", "a")
+	f = open(fw_out_path+"run_stats.txt", "a")
 	f.write(f"Plan {i} speed: {avg_speed}, average-energy: {avg_energy}, time: {avg_time}\n")
 	f.close()
 	print("  * Consistent results:", good_plan, parameters)
@@ -234,7 +349,7 @@ def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL
 		run_solver = False
 		iteration += 1
 		# Record this data
-		f = open("run_stats.txt", "a")
+		f = open(fw_out_path+"run_stats.txt", "a")
 		f.write(f"{alpha} {v_j}\n")
 		f.close()
 		## Run solver
@@ -269,7 +384,7 @@ def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL
 			## Are plans consistent?
 			good_tour, new_stats = consistent(stats, v_j, alpha, i)
 			# Record this data
-			f = open("run_stats.txt", "a")
+			f = open(fw_out_path+"run_stats.txt", "a")
 			f.write(f"Sensors: {sensors}, time: {r_time}\n")
 			f.write(f"Consistent plan: {good_tour}, recommended parameters: {new_stats}\n")
 			f.close()
@@ -289,9 +404,13 @@ def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL
 		v_j = total_speeds/num_plans
 		alpha = min(total_alpha/num_plans, alpha)
 		# Record this data
-		f = open("run_stats.txt", "a")
-		f.write(f"Results: {good_plan} {total_sensors} {alpha} {v_j} {cumulative_latency/total_sensors} {total_time} {input_file}\n")
+		f = open(fw_out_path+"run_stats.txt", "a")
+		f.write(f"Results: {good_plan} {total_sensors} {alpha} {v_j} {cumulative_latency/total_sensors} {total_time} {input_file} {iteration}\n")
 		f.close()
+		with open(fw_out_path+"fw_stats.txt", "a") as f:
+			f.write(f"{{valid:{good_plan}, sensors:{total_sensors}, alpha:{alpha}, time:{total_time}, average_lat:{cumulative_latency/total_sensors}, sorties:{num_plans}, iterations:{iteration}, input:{input_file}}}\n")
+	return alpha, v_j
+
 		
 
 
@@ -319,48 +438,89 @@ if __name__ == '__main__':
 	End-while
 	'''
 
-	if len(sys.argv) == 1:
-		print("(Standard) Running all inputs in:", exp_path)
-		for n in range(5, 31, 5):
-			for i in range(NUM_PLOTS):
-				input_file = exp_path+f"plot_{n}_{i}.txt"
-				print(f"Running framework on {input_file}")
-				# Record this data
-				f = open("run_stats.txt", "a")
-				f.write(f"Running framework on {input_file}\n")
-				f.close()
-				# Run our algorithm
-				run_framework(input_file)
-		print("(Alpha fixed at 0.75) Running all inputs in:", exp_path)
-		for n in range(5, 31, 5):
-			for i in range(NUM_PLOTS):
-				input_file = exp_path+f"plot_{n}_{i}.txt"
-				print(f"Running framework on {input_file}")
-				# Record this data
-				f = open("run_stats.txt", "a")
-				f.write(f"Running framework on {input_file}\n")
-				f.close()
-				# Run our algorithm
-				run_framework(input_file,initial_alpha=0.75,find_consistent=False)
-		print("(Alpha fixed at 0.5) Running all inputs in:", exp_path)
-		for n in range(5, 31, 5):
-			for i in range(NUM_PLOTS):
-				input_file = exp_path+f"plot_{n}_{i}.txt"
-				print(f"Running framework on {input_file}")
-				# Record this data
-				f = open("run_stats.txt", "a")
-				f.write(f"Running framework on {input_file}\n")
-				f.close()
-				# Run our algorithm
-				run_framework(input_file,initial_alpha=0.5,find_consistent=False)
+	if len(sys.argv) == 2:
+		if sys.argv[1] == "framework":
+			print("(Standard) Running all inputs in:", exp_path)
+			for n in range(5, 31, 5):
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					print(f"Running framework on {input_file}")
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Running framework on {input_file}\n")
+					f.close()
+					# Run our algorithm
+					run_framework(input_file)
+			print("(Alpha fixed at 0.75) Running all inputs in:", exp_path)
+			for n in range(5, 31, 5):
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					print(f"Running framework on {input_file}")
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Running framework on {input_file}\n")
+					f.close()
+					# Run our algorithm
+					run_framework(input_file,initial_alpha=0.75,find_consistent=False)
+			print("(Alpha fixed at 0.5) Running all inputs in:", exp_path)
+			for n in range(5, 31, 5):
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					print(f"Running framework on {input_file}")
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Running framework on {input_file}\n")
+					f.close()
+					# Run our algorithm
+					run_framework(input_file,initial_alpha=0.5,find_consistent=False)
 
-	elif len(sys.argv) == 2:
-		print("Running framework on single input:", sys.argv[1])
-		# Record this data
-		f = open("run_stats.txt", "a")
-		f.write(f"Running framework on {sys.argv[1]}\n")
-		f.close()
-		# Run our algorithm
-		run_framework(sys.argv[1])
+		if sys.argv[1] == "performance-reactive":
+			print("Reactive baseline (Alpha = 1) with all inputs in:", exp_path)
+			for n in range(5, 31, 5):
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					for run in range(ITERATIONS):
+						print(f" => Starting Baseline Run for {input_file}, run {run}")
+						run_baseline(input_file, fixed_alpha=1.0)
+			print("Reactive baseline (Alpha = 0.75) with all inputs in:", exp_path)
+			for n in range(5, 31, 5):
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					for run in range(ITERATIONS):
+						print(f" => Starting Baseline Run for {input_file}, run {run}")
+						run_baseline(input_file, fixed_alpha=0.75)
+			print("Reactive baseline (Alpha = 0.5) with all inputs in:", exp_path)
+			for n in range(5, 31, 5):
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					for run in range(ITERATIONS):
+						print(f" => Starting Baseline Run for {input_file}, run {run}")
+						run_baseline(input_file, fixed_alpha=0.5)
+
+		if sys.argv[1] == "performance-framework":
+			print("(Standard) Running all inputs in:", exp_path)
+			for n in range(25, 31, 5):
+				for i in range(NUM_PLOTS):
+					for run in range(ITERATIONS):
+						input_file = exp_path+f"plot_{n}_{i}.txt"
+						print(f"Determining parameters for {input_file}")
+						# Record this data
+						f = open(fw_out_path+"run_stats.txt", "a")
+						f.write(f"Running framework on {input_file}\n")
+						f.close()
+						# Run the framework
+						alpha, v = run_framework(input_file)
+						# Using the found alpha, v, run the planner/sim again..
+						print(f"Found {alpha}:{v}, Running {input_file}\n")
+						run_baseline(input_file=input_file, fixed_alpha=alpha, fixed_v = v)
+
+		else:
+			print("Running framework on single input:", sys.argv[1])
+			# Record this data
+			f = open(fw_out_path+"run_stats.txt", "a")
+			f.write(f"Running framework on {sys.argv[1]}\n")
+			f.close()
+			# Run our algorithm
+			run_framework(sys.argv[1])
 	else:
 		print("Unexpected arguments...")
