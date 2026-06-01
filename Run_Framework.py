@@ -6,7 +6,7 @@ import sys
 
 
 # Path to the C++ executable
-ORCHESTRATOR_PATH = "/home/jonathan/git/HolisticFramework/"
+ORCHESTRATOR_PATH = "/home/diller/git/HolisticFramework/"
 # Run parameters
 NUM_PLOTS = 10
 BATTERY_BUFFER = 0.05
@@ -25,10 +25,11 @@ mp_path = ORCHESTRATOR_PATH+"MissionPlanner/build/mission-planner"
 sim_path = ORCHESTRATOR_PATH+"DroNS3/simulation.py"
 exp_path = ORCHESTRATOR_PATH+"FW_Test/"
 plan_path = ORCHESTRATOR_PATH+"plan/"
+noise_file = ORCHESTRATOR_PATH+"plan_online/noise"
 odom_path = ORCHESTRATOR_PATH+"odometry/"
 sim_out_path = ORCHESTRATOR_PATH+"sim_out/"
 fw_out_path = ORCHESTRATOR_PATH+"framework_out/"
-python_path = "/home/jonathan/git/HolisticFramework/drone_env/bin/python"
+python_path = "/home/diller/git/HolisticFramework/.drone/bin/python"
 
 '''
 We are using drone 1, from "Looking before Crossing..." paper but with limited battery
@@ -42,6 +43,11 @@ We are using drone 1, from "Looking before Crossing..." paper but with limited b
 # Energy profile ( c1x^{3} + c2x^{2} + c3x + c4 )
 0.07 0.0391 -13.196 390.95
 '''
+
+mu = 0.75
+noise = -1.0
+drone_id = 0
+
 
 def energy_used(v, t):
 	power = (0.07)*v**3 + (0.0391)*v**2 + (-13.196)*v + (390.95)
@@ -92,6 +98,10 @@ def prepare_standard_scenario(input_file_location, v, alpha):
 	# Write to scenario_run.txt
 	with open('scenario_run.txt', 'w') as scenario_run_file:
 		scenario_run_file.write(content)
+	# Set noise (if needed)
+	if noise > 0.0:
+		with open(noise_file, 'w') as file:
+			file.write(str(noise))
 
 
 # Function to run mission planner and wait for it to finish
@@ -122,9 +132,11 @@ def run_simulation(sim_plan_path):
 	# Time run
 	start_time = time.time()
 	# path-to-python, path-to-DroNS3-sim, path-to-plan
-	process = subprocess.Popen([python_path, sim_path, sim_plan_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	process = subprocess.Popen([python_path, sim_path, sim_plan_path, str(drone_id)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	stdout, stderr = process.communicate()  # Waits for the executable to finish
 	end_time = time.time()
+	# Short sleep to let the sim fully finish
+	time.sleep(2.5)
 	if stderr:
 		# print(str(stdout))
 		print(f"Error:\n{stderr.decode()}")
@@ -169,80 +181,6 @@ def update_input_for_remaining_sensors(original_input_file, unvisited_ids, new_i
 			
 		# Append the base station at the end
 		f.write(base_station_line)
-
-
-def run_baseline(input_file, fixed_alpha=1.0, fixed_v=INITIAL_V):
-	current_input = input_file
-	iteration = 0
-	all_sensors_visited = False
-	cumulative_time = 0
-	cumulative_latency = 0
-	total_sensors_collected = 0
-	unvisited_file = sim_out_path+"unvisited_sensors.txt"
-
-	while not all_sensors_visited:
-		all_sensors_visited = True
-		# Prepare scenario files
-		prepare_standard_scenario(current_input, fixed_v, fixed_alpha)
-		# Run the mission planner
-		run_mission_planner(ALGORITHM, exp_path, 0)
-		# How many plans did we generate? (there is a blank .temp file we need to ignore)
-		num_plans = len([name for name in os.listdir(plan_path) if os.path.isfile(os.path.join(plan_path, name))]) - 1
-		print(" Number of generated plans: ", num_plans)
-		# For each generated plan...
-		for i in range(num_plans):
-			restart_planner = False
-			# Run the simulator
-			print(f" Running Simulator")
-			r_time, sensors = run_simulation(plan_path+f"plan_0_{i}.pln")
-			# Do we have left-over waypoints?
-			if os.path.exists(unvisited_file):
-				# Yes... Collect ALL unvisited waypoints
-				restart_planner = True
-				unvisited_ids = []
-				# Get sensors from this mission
-				with open(unvisited_file, 'r') as f:
-					unvisited_ids = f.read().split()
-				print(f"   Failed to visit: {unvisited_ids}")
-				sensors -= len(unvisited_ids)
-				# Get the sensors from plans (i+1) up to num_plans
-				for j in range((i+1), num_plans):
-					# Open the plan file in read mode
-					with open(plan_path+f"plan_0_{j}.pln", "r") as file:
-						# Loop through each line in the file
-						for line in file:
-							# Split the line into a list of strings based on whitespace
-							parts = line.split()
-							# Check if the line is not empty and if the first element is '5'
-							if len(parts) > 0 and parts[0] == '5':
-								# The sensor ID is the second element (index 1)
-								sensor_id = parts[1]
-								# Append the ID to our list (converting it to an integer is optional but recommended)
-								unvisited_ids.append(int(sensor_id))
-				# Clean up for next run
-				os.remove(unvisited_file)
-				# Update the input file
-				current_input = exp_path + f"temp_input.txt"
-				update_input_for_remaining_sensors(input_file, unvisited_ids, current_input)
-				# Break out of for... retart while-loop
-				all_sensors_visited = False
-
-			# Record run stats
-			total_sensors_collected += sensors
-			if iteration > 1:
-				cumulative_time += r_time + BATTERY_SWAP
-			else:
-				cumulative_time += r_time
-			cumulative_latency += cumulative_time*sensors
-			iteration += 1
-			if restart_planner:
-				break
-
-	# If we hit this part... we hit every sensor!
-	print("  All sensors successfully visited!")
-	# Record final data for the baseline
-	with open(fw_out_path+"baseline_stats.txt", "a") as f:
-		f.write(f"{{sensors:{total_sensors_collected}, alpha:{fixed_alpha}, time:{cumulative_time}, average_lat:{cumulative_latency/total_sensors_collected}, sorties:{iteration}, input:{input_file}}}\n")
 
 
 def collect_run_stats(stat_list):
@@ -314,7 +252,7 @@ def consistent(run_stats, v_j, alpha, i = 0):
 	if max_energy > safe_battery():
 		good_plan = False
 		# Update alpha (only when bad!) a_i+1 = a_i(desired-usage/actual-usage)
-		parameters[1] = alpha*(1 - 0.75*(1 - safe_battery()/max_energy))
+		parameters[1] = alpha*(1 - mu*(1 - safe_battery()/max_energy))
 		print(f"   Max recorded energy {max_energy} higher than {safe_battery()}, update alpha to {parameters[1]}")
 	# Error in speed (Not required for consistency)
 	v_error = (v_j-avg_speed)/v_j
@@ -336,7 +274,90 @@ def consistent(run_stats, v_j, alpha, i = 0):
 	return good_plan, parameters
 
 
-def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL_V, find_consistent = True):
+def run_baseline(input_file, fixed_alpha=1.0, fixed_v=INITIAL_V, monte_it=ITERATIONS):
+	current_input = input_file
+	iteration = 0
+	all_sensors_visited = False
+	cumulative_time = 0
+	cumulative_latency = 0
+	total_sensors_collected = 0
+	unvisited_file = sim_out_path+"unvisited_sensors.txt"
+	stats = []
+	replanned = False
+
+	while not all_sensors_visited:
+		all_sensors_visited = True
+		# Prepare scenario files
+		prepare_standard_scenario(current_input, fixed_v, fixed_alpha)
+		# Run the mission planner
+		run_mission_planner(ALGORITHM, exp_path, 0)
+		# How many plans did we generate? (there is a blank .temp file we need to ignore)
+		num_plans = len([name for name in os.listdir(plan_path) if os.path.isfile(os.path.join(plan_path, name))]) - 1
+		print(" Number of generated plans: ", num_plans)
+		# For each generated plan...
+		for i in range(num_plans):
+			restart_planner = False
+			# Run the simulator
+			print(f" Running Simulator")
+			r_time, sensors = run_simulation(plan_path+f"plan_0_{i}.pln")
+
+			## Collect average energy used, drone speed
+			collect_run_stats(stats)
+
+			# Do we have left-over waypoints?
+			if os.path.exists(unvisited_file):
+				# Yes... Collect ALL unvisited waypoints
+				restart_planner = True
+				unvisited_ids = []
+				# Get sensors from this mission
+				with open(unvisited_file, 'r') as f:
+					unvisited_ids = f.read().split()
+				print(f"   Failed to visit: {unvisited_ids}")
+				sensors -= len(unvisited_ids)
+				# Get the sensors from plans (i+1) up to num_plans
+				for j in range((i+1), num_plans):
+					# Open the plan file in read mode
+					with open(plan_path+f"plan_0_{j}.pln", "r") as file:
+						# Loop through each line in the file
+						for line in file:
+							# Split the line into a list of strings based on whitespace
+							parts = line.split()
+							# Check if the line is not empty and if the first element is '5'
+							if len(parts) > 0 and parts[0] == '5':
+								# The sensor ID is the second element (index 1)
+								sensor_id = parts[1]
+								# Append the ID to our list (converting it to an integer is optional but recommended)
+								unvisited_ids.append(int(sensor_id))
+				# Clean up for next run
+				os.remove(unvisited_file)
+				# Update the input file
+				current_input = exp_path + f"temp_input.txt"
+				update_input_for_remaining_sensors(input_file, unvisited_ids, current_input)
+				# Break out of for... retart while-loop
+				all_sensors_visited = False
+				replanned = True
+
+			# Record run stats
+			total_sensors_collected += sensors
+			if iteration > 1:
+				cumulative_time += r_time + BATTERY_SWAP
+			else:
+				cumulative_time += r_time
+			cumulative_latency += cumulative_time*sensors
+			iteration += 1
+			if restart_planner:
+				break
+				
+	# If we hit this part... we hit every sensor!
+	print("  All sensors successfully visited!")
+	## Are all plans consistent?
+	good_tour, new_stats = consistent(stats, INITIAL_V, INITIAL_ALPHA, i)
+	# Record final data for the baseline
+	with open(fw_out_path+"baseline_stats.txt", "a") as f:
+		f.write(f"{{sensors:{total_sensors_collected}, alpha:{fixed_alpha}, time:{cumulative_time}, average_lat:{cumulative_latency/total_sensors_collected}, sorties:{iteration}, monte_it:{monte_it}, noise:{noise}, good_tour:{good_tour}, replanned:{replanned}, input:{input_file}}}\n")
+
+
+def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL_V, find_consistent = True, monte_it = ITERATIONS):
 	## Set initial v_j and alpha_j guess
 	v_j = initial_v
 	# v_j = 5.0
@@ -373,12 +394,10 @@ def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL
 			stats = []
 			r_time = 0
 			sensors = 0
-			for run in range(ITERATIONS):
+			for run in range(monte_it):
 				## Run simultor
 				print(f" Running Simulator")
 				r_time, sensors = run_simulation(plan_path+f"plan_0_{i}.pln")
-				# Short sleep to let the sim fully finish
-				time.sleep(2.5)
 				## Collect average energy used, drone speed
 				collect_run_stats(stats)
 			## Are plans consistent?
@@ -405,10 +424,10 @@ def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL
 		alpha = min(total_alpha/num_plans, alpha)
 		# Record this data
 		f = open(fw_out_path+"run_stats.txt", "a")
-		f.write(f"Results: {good_plan} {total_sensors} {alpha} {v_j} {cumulative_latency/total_sensors} {total_time} {input_file} {iteration}\n")
+		f.write(f"Results: {good_plan} {total_sensors} {alpha} {v_j} {cumulative_latency/total_sensors} {total_time} {input_file} {iteration} {mu}\n")
 		f.close()
 		with open(fw_out_path+"fw_stats.txt", "a") as f:
-			f.write(f"{{valid:{good_plan}, sensors:{total_sensors}, alpha:{alpha}, time:{total_time}, average_lat:{cumulative_latency/total_sensors}, sorties:{num_plans}, iterations:{iteration}, input:{input_file}}}\n")
+			f.write(f"{{valid:{good_plan}, sensors:{total_sensors}, alpha:{alpha}, time:{total_time}, average_lat:{cumulative_latency/total_sensors}, sorties:{num_plans}, iterations:{iteration}, mu:{mu}, noise:{noise}, input:{input_file}}}\n")
 	return alpha, v_j
 
 		
@@ -514,6 +533,64 @@ if __name__ == '__main__':
 						print(f"Found {alpha}:{v}, Running {input_file}\n")
 						run_baseline(input_file=input_file, fixed_alpha=alpha, fixed_v = v)
 
+		if sys.argv[1] == "monte":
+			print("Evaluating monte-carlo impact:", exp_path)
+			n = 20
+			# for it in range(1, 7):
+			for it in range(1, 3):
+				for i in range(NUM_PLOTS):
+					# Determine alpha using varying monte-setting
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					print(f"Determining parameters for {input_file}")
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Running framework on {input_file}\n")
+					f.close()
+					# Run the framework
+					alpha, v = run_framework(input_file, monte_it=it)
+					# Now determine if that was a good setup...
+					for run in range(5):
+						# Using the found alpha, v, run the planner/sim again..
+						print(f"Found {alpha}:{v}, Running {input_file}\n")
+						run_baseline(input_file=input_file, fixed_alpha=alpha, fixed_v = v, monte_it=it)
+						
+		if sys.argv[1] == "alpha-converge":
+			print("Running alpha convergence test for inputs in:", exp_path)
+			n = 20
+			for step in range(5):
+				mu = (1-step*0.05)
+				print(f"Set mu = {mu}")
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					print(f"Running framework on {input_file}")
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Running framework on {input_file}\n")
+					f.close()
+					# Run our algorithm
+					run_framework(input_file)
+
+		if sys.argv[1] == "noise":
+			n = 20
+			print(f"Running noise test for {n} sensors in:", exp_path)
+			# for step in range(0, 6):
+			for step in range(0, 2):
+				noise = step*0.3
+				print(f"Set noise = {noise}")
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					print(f"Running framework on {input_file}")
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Running framework on {input_file}\n")
+					f.close()
+					# Run our algorithm
+					alpha, v = run_framework(input_file)
+					# Now run the baseline a few times..
+					print(f"Running baseline with a = {alpha}, v = {v}")
+					for it in range(5):
+						run_baseline(input_file=input_file, fixed_alpha=alpha, fixed_v = v)
+						
 		else:
 			print("Running framework on single input:", sys.argv[1])
 			# Record this data
