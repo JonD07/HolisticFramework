@@ -2,6 +2,7 @@ import subprocess
 import os, os.path, shutil
 import time
 import sys
+from pathlib import Path
 
 
 
@@ -19,7 +20,9 @@ INITIAL_V = 7.5
 # Mission planner algorithm
 ALGORITHM = 3
 ITERATIONS = 3
+MONTE_IT = 5
 CONSISTENT_SPEED = True
+NUM_DRONES = 1
 
 mp_path = ORCHESTRATOR_PATH+"MissionPlanner/build/mission-planner"
 sim_path = ORCHESTRATOR_PATH+"DroNS3/simulation.py"
@@ -44,7 +47,7 @@ We are using drone 1, from "Looking before Crossing..." paper but with limited b
 0.07 0.0391 -13.196 390.95
 '''
 
-mu = 0.75
+mu = 0.85
 noise = -1.0
 drone_id = 0
 
@@ -86,15 +89,18 @@ def prepare_standard_scenario(input_file_location, v, alpha):
 	# Read from scenario.txt
 	with open('scenario.txt', 'r') as scenario_file:
 		content = scenario_file.read()
+
 	# Add the location of the input
-	content += input_file_location+"\n"
-	# Add in drone
-	content += f"{DRONE_NUM}\n"
+	content += input_file_location
 	# Write the online setup file (used for online planner/DroNS3)
 	with open('scenario_online_setup.txt', 'w') as scenario_run_file:
 		scenario_run_file.write(content)
-	# Add in drone details
-	content += f"{v} {alpha}"
+		scenario_run_file.write(f"\n{DRONE_NUM}\n")
+	# Add in drone(s)
+	for m in range(NUM_DRONES):
+		# Add in drone details
+		content += f"\n{DRONE_NUM}"
+		content += f"\n{v} {alpha}"
 	# Write to scenario_run.txt
 	with open('scenario_run.txt', 'w') as scenario_run_file:
 		scenario_run_file.write(content)
@@ -274,7 +280,7 @@ def consistent(run_stats, v_j, alpha, i = 0):
 	return good_plan, parameters
 
 
-def run_baseline(input_file, fixed_alpha=1.0, fixed_v=INITIAL_V, monte_it=ITERATIONS):
+def run_baseline(input_file, fixed_alpha=1.0, fixed_v=INITIAL_V, monte_it=MONTE_IT):
 	current_input = input_file
 	iteration = 0
 	all_sensors_visited = False
@@ -357,7 +363,7 @@ def run_baseline(input_file, fixed_alpha=1.0, fixed_v=INITIAL_V, monte_it=ITERAT
 		f.write(f"{{sensors:{total_sensors_collected}, alpha:{fixed_alpha}, time:{cumulative_time}, average_lat:{cumulative_latency/total_sensors_collected}, sorties:{iteration}, monte_it:{monte_it}, noise:{noise}, good_tour:{good_tour}, replanned:{replanned}, input:{input_file}}}\n")
 
 
-def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL_V, find_consistent = True, monte_it = ITERATIONS):
+def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL_V, find_consistent = True, monte_it = MONTE_IT):
 	## Set initial v_j and alpha_j guess
 	v_j = initial_v
 	# v_j = 5.0
@@ -385,49 +391,71 @@ def run_framework(input_file, initial_alpha = INITIAL_ALPHA, initial_v = INITIAL
 		# How many plans did we generate? (there is a blank .temp file we need to ignore)
 		num_plans = len([name for name in os.listdir(plan_path) if os.path.isfile(os.path.join(plan_path, name))]) - 1
 		print(" Number of generated plans: ", num_plans)
-		total_time = 0
+		# Some tracking numbers
+		max_lat = 0
 		cumulative_latency = 0
 		total_sensors = 0
-		## For each plan file generated:
-		for i in range(num_plans):
-			## For iterations
-			stats = []
-			r_time = 0
-			sensors = 0
-			for run in range(monte_it):
-				## Run simultor
-				print(f" Running Simulator")
-				r_time, sensors = run_simulation(plan_path+f"plan_0_{i}.pln")
-				## Collect average energy used, drone speed
-				collect_run_stats(stats)
-			## Are plans consistent?
-			good_tour, new_stats = consistent(stats, v_j, alpha, i)
-			# Record this data
-			f = open(fw_out_path+"run_stats.txt", "a")
-			f.write(f"Sensors: {sensors}, time: {r_time}\n")
-			f.write(f"Consistent plan: {good_tour}, recommended parameters: {new_stats}\n")
-			f.close()
-			# Track the averages
-			total_speeds += new_stats[0]
-			total_alpha += new_stats[1]
-			good_plan = good_plan and good_tour
-			if i > 0:
-				total_time+=r_time+BATTERY_SWAP
-			else:
-				total_time+=r_time
-			cumulative_latency += total_time*sensors
-			total_sensors += sensors
+		plots_ran = 0
+
+		# For each drone
+		for m in range(NUM_DRONES):
+			total_time = 0
+			# From 0 to num_plans
+			for i in range(num_plans):
+				# Does this file exist?
+				file_path = Path(plan_path+f"plan_{m}_{i}.pln")
+				if file_path.is_file():
+					# Yes, run the framework
+					stats = []
+					r_time = 0
+					sensors = 0
+					for run in range(monte_it):
+						## Run simultor
+						print(f" Running Simulator")
+						r_time, sensors = run_simulation(plan_path+f"plan_0_{i}.pln")
+						## Collect average energy used, drone speed
+						collect_run_stats(stats)
+					## Are plans consistent?
+					good_tour, new_stats = consistent(stats, v_j, alpha, i)
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Sensors: {sensors}, time: {r_time}\n")
+					f.write(f"Consistent plan: {good_tour}, recommended parameters: {new_stats}\n")
+					f.close()
+					# Track the averages
+					total_speeds += new_stats[0]
+					total_alpha += new_stats[1]
+					good_plan = good_plan and good_tour
+					if i > 0:
+						total_time+=r_time+BATTERY_SWAP
+					else:
+						total_time+=r_time
+					cumulative_latency += total_time*sensors
+					total_sensors += sensors
+					# Is this a worst latency than before..?
+					if max_lat < total_time:
+						max_lat = total_time
+					plots_ran += 1
+				else:
+					# No, break and re-run
+					break
+		# Did we hit every file?
+		if plots_ran != num_plans:
+			# Not good.. something went wrong here
+			print(f"Number of plots ({num_plans}) != number of runs ({plots_ran})")
+			exit()
+
 		# Do we run again..?
 		if find_consistent:
 			run_solver = not good_plan
-		v_j = total_speeds/num_plans
-		alpha = min(total_alpha/num_plans, alpha)
 		# Record this data
 		f = open(fw_out_path+"run_stats.txt", "a")
 		f.write(f"Results: {good_plan} {total_sensors} {alpha} {v_j} {cumulative_latency/total_sensors} {total_time} {input_file} {iteration} {mu}\n")
 		f.close()
 		with open(fw_out_path+"fw_stats.txt", "a") as f:
-			f.write(f"{{valid:{good_plan}, sensors:{total_sensors}, alpha:{alpha}, time:{total_time}, average_lat:{cumulative_latency/total_sensors}, sorties:{num_plans}, iterations:{iteration}, mu:{mu}, noise:{noise}, input:{input_file}}}\n")
+			f.write(f"{{valid:{good_plan}, sensors:{total_sensors}, drones{NUM_DRONES} alpha:{alpha}, worst_lat:{max_lat}, average_lat:{cumulative_latency/total_sensors}, find_consistent:{find_consistent}, sorties:{num_plans}, iterations:{iteration}, mu:{mu}, noise:{noise}, input:{input_file}}}\n")
+		v_j = total_speeds/num_plans
+		alpha = min(total_alpha/num_plans, alpha)
 	return alpha, v_j
 
 		
@@ -590,7 +618,48 @@ if __name__ == '__main__':
 					print(f"Running baseline with a = {alpha}, v = {v}")
 					for it in range(5):
 						run_baseline(input_file=input_file, fixed_alpha=alpha, fixed_v = v)
-						
+
+		if sys.argv[1] == "inc-drones":
+			n = 25
+			print(f"(Standard) Running inputs with {n} sensors:", exp_path)
+			for m in range(1, 6):
+				NUM_DRONES = m
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					print(f"Running framework on {input_file}")
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Running framework on {input_file}\n")
+					f.close()
+					# Run our algorithm
+					alpha, v = run_framework(input_file)
+					# Run once to record the actual result
+					run_framework(input_file, initial_alpha=alpha, initial_v=v, find_consistent=False)
+			print(f"(Alpha fixed at 0.75) Running inputs with {n} sensors:", exp_path)
+			for m in range(1, 6):
+				NUM_DRONES = m
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					print(f"Running framework on {input_file}")
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Running framework on {input_file}\n")
+					f.close()
+					# Run our algorithm
+					run_framework(input_file,initial_alpha=0.75,find_consistent=False)
+			print(f"(Alpha fixed at 0.5) Running inputs with {n} sensors:", exp_path)
+			for m in range(1, 6):
+				NUM_DRONES = m
+				for i in range(NUM_PLOTS):
+					input_file = exp_path+f"plot_{n}_{i}.txt"
+					print(f"Running framework on {input_file}")
+					# Record this data
+					f = open(fw_out_path+"run_stats.txt", "a")
+					f.write(f"Running framework on {input_file}\n")
+					f.close()
+					# Run our algorithm
+					run_framework(input_file,initial_alpha=0.5,find_consistent=False)
+
 		else:
 			print("Running framework on single input:", sys.argv[1])
 			# Record this data
